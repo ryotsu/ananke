@@ -12,6 +12,7 @@ defmodule Ananke.Application do
       supervisor(AnankeWeb.Endpoint, []),
       # Start your own worker by calling: Ananke.Worker.start_link(arg1, arg2, arg3)
       # worker(Ananke.Worker, [arg1, arg2, arg3]),
+      worker(Ananke.Manager, [])
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
