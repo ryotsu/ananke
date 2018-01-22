@@ -5,7 +5,9 @@
   ],
   "bs-dependencies": [
     "@glennsl/bs-json",
-    "bucklescript-phx"
+    "bucklescript-phx",
+    "bs-webapi",
+    "bs-fetch"
   ],
   "package-specs": {
     "module": "commonjs",

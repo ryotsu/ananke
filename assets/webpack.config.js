@@ -25,19 +25,26 @@ const config = {
           },
         },
         {
+          test: /\.(ttf|eot|woff|woff2)$/,
+          loader: "file-loader",
+          options: {
+            name: "[name].[ext]",
+          },
+        },
+        {
           test: /\.css$/,
           use: ExtractTextPlugin.extract({
             fallback: "style-loader",
             use: [
               {
-                loader: require.resolve('css-loader'),
+                loader: 'css-loader',
                 options: {
                   importLoaders: 1,
                   minimize: true,
                 },
               },
               {
-                loader: require.resolve('postcss-loader'),
+                loader: 'postcss-loader',
                 options: {
                   // Necessary for external CSS imports to work
                   // https://github.com/facebookincubator/create-react-app/issues/2677
@@ -70,7 +77,7 @@ const config = {
           }]
         },
         {
-          loader: require.resolve('file-loader'),
+          loader: 'file-loader',
           exclude: [/\.js$/, /\.html$/, /\.json$/]
         }
       ]

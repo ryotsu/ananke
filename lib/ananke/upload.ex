@@ -12,6 +12,7 @@ defmodule Ananke.Upload do
   @spec write(t, Plug.Conn.t(), list) :: {Plug.Conn.t(), :accepted | :created, t}
   def write(%__MODULE__{path: path, uploaded: uploaded, size: size} = upload, conn, opts) do
     {:ok, file} = File.open(path, [:read, :write, :binary, :delayed_write, :raw])
+    {:ok, _pos} = :file.position(file, {:eof, 0})
 
     {status, remaining, conn} =
       write_file(Plug.Conn.read_body(conn, opts), file, size - uploaded, opts)
