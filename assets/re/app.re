@@ -12,23 +12,38 @@ let map = f =>
   | Some(v) => Some(f(v))
   | None => None;
 
+let toggle_button = id => {
+  let _ =
+    document
+    |> Document.getElementById(id)
+    |> map(Element.classList)
+    |> map(DomTokenList.toggle("pure-button-disabled"));
+  ();
+};
+
 let make_req_body = (name, size) =>
   Json.Encode.(object_([("name", string(name)), ("size", int(size))]))
   |> Json.stringify
   |> Fetch.BodyInit.make;
 
+let show_link = location => {
+  let elem = Document.getElementById("link", document) |> unwrap;
+  let _ = Element.setInnerHTML(elem, location);
+  Js.Promise.resolve(location);
+};
+
 let get_location = resp =>
   Fetch.Response.headers(resp)
   |> Fetch.Headers.get("location")
-  |> unwrap
-  |> Js.Promise.resolve;
+  |> map(Js.Promise.resolve)
+  |> unwrap;
 
 let update_progress = uploaded =>
   document
   |> Document.getElementById("upload-progress")
   |> map(Element.setAttribute("value", uploaded |> string_of_int));
 
-let rec upload_part = (file, size, start, end', location) => {
+let rec upload_blob = (file, size, start, end', location) => {
   let end' = size > end' ? end' : size;
   let body = file |> File.slice(start, end') |> Fetch.BodyInit.makeWithBlob;
   Js.Promise.(
@@ -42,8 +57,11 @@ let rec upload_part = (file, size, start, end', location) => {
 and send_file = (file, size, start, end', location) => {
   let _ = update_progress(start);
   size == start ?
-    Js.log("Uploaded!") |> Js.Promise.resolve :
-    upload_part(file, size, start, end', location);
+    {
+      toggle_button("file-select");
+      Js.log("Uploaded!") |> Js.Promise.resolve;
+    } :
+    upload_blob(file, size, start, end', location);
 };
 
 let init = (file, size, body, headers) =>
@@ -53,6 +71,7 @@ let init = (file, size, body, headers) =>
       Fetch.RequestInit.make(~method_=Post, ~headers, ~body, ())
     )
     |> then_(get_location)
+    |> then_(show_link)
     |> then_(send_file(file, size, 0, offset))
   );
 
@@ -85,24 +104,16 @@ let upload_file = () =>
   |> map(Array.iter(upload))
   |> unwrap;
 
-let toggle_upload_button = () => {
-  let _ =
-    document
-    |> Document.getElementById("upload")
-    |> map(Element.classList)
-    |> map(DomTokenList.toggle("pure-button-disabled"));
-  ();
-};
-
 document
 |> Document.getElementById("file-upload")
-|> map(Element.addEventListener("change", _evt => toggle_upload_button()));
+|> map(Element.addEventListener("change", _evt => toggle_button("upload")));
 
 document
 |> Document.getElementById("upload")
 |> map(
      Element.addEventListener("click", _evt => {
-       toggle_upload_button();
+       toggle_button("file-select");
+       toggle_button("upload");
        upload_file();
      })
    );
