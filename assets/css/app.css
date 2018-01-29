@@ -40,3 +40,7 @@ html, body {
   cursor: pointer;
   opacity: 0;
 }
+
+.button-secondary {
+  background: rgb(202, 60, 60);
+}
