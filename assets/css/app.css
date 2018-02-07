@@ -22,14 +22,19 @@ html, body {
 }
 
 .box {
-  margin: 10px;
   text-align: center;
+  margin: 10px;
 }
 
 .file-upload {
   position: relative;
   overflow: hidden;
   display: inline-block;
+  margin: 10px;
+}
+
+i {
+  margin-right: 5px;
 }
 
 .file-upload input[type=file] {
