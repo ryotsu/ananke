@@ -24,37 +24,61 @@ defmodule Ananke.Manager do
     GenServer.call(__MODULE__, {:save, url, file})
   end
 
+  @spec download_file(String.t()) :: {:ok, Upload.t()} | :error
+  def download_file(url) do
+    GenServer.call(__MODULE__, {:download, url})
+  end
+
   def init(:ok) do
     Process.flag(:trap_exit, true)
     :ets.new(@table, [:named_table, :public, :set])
     tmp = Path.join(File.cwd!(), "tmp")
     :ok = File.mkdir_p(tmp)
-    {:ok, {tmp, []}}
+    {:ok, %{tmp: tmp, opened: [], downloaders: %{}, pids: %{}}}
   end
 
-  def handle_call({:new, name, size}, _from, {tmp, _opened} = state) do
+  def handle_call({:new, name, size}, _from, %{tmp: tmp} = state) do
     file = create(name, size, tmp)
     true = :ets.insert_new(@table, {file.url, file})
     {:reply, file.url, state}
   end
 
-  def handle_call({:get, url}, _from, {tmp, opened}) do
+  def handle_call({:get, url}, _from, %{opened: opened} = state) do
     case {:ets.lookup(@table, url), url in opened} do
       {[{^url, file}], false} ->
-        {:reply, {:ok, file}, {tmp, [url | opened]}}
+        {:reply, {:ok, file}, %{state | opened: [url | opened]}}
 
       _ ->
-        {:reply, :error, {tmp, opened}}
+        {:reply, :error, state}
     end
   end
 
-  def handle_call({:save, url, file}, _from, {tmp, opened}) do
+  def handle_call({:save, url, file}, _from, %{downloaders: dlers, opened: opened} = state) do
     :ets.insert(@table, {url, file})
-    opened = List.delete(opened, url)
-    {:reply, :ok, {tmp, opened}}
+    for pid <- Map.get(dlers, url, []), do: send(pid, {:next, file.uploaded})
+    {:reply, :ok, %{state | opened: List.delete(opened, url)}}
   end
 
-  def terminate(_reason, {tmp, _opened}) do
+  def handle_call({:download, url}, {pid, _tag}, %{downloaders: dlrs, pids: pids} = state) do
+    case :ets.lookup(@table, url) do
+      [{^url, file}] ->
+        Process.monitor(pid)
+        dlrs = Map.update(dlrs, url, [pid], fn pids -> [pid | pids] end)
+        pids = Map.put(pids, pid, url)
+        {:reply, {:ok, file}, %{state | downloaders: dlrs, pids: pids}}
+
+      _ ->
+        {:reply, :error, state}
+    end
+  end
+
+  def handle_info({:DOWN, _ref, :process, pid, _rsn}, %{downloaders: dlrs, pids: pids} = state) do
+    {url, pids} = Map.pop(pids, pid)
+    dlrs = Map.update(dlrs, url, [], &List.delete(&1, pid))
+    {:noreply, %{state | downloaders: dlrs, pids: pids}}
+  end
+
+  def terminate(_reason, %{tmp: tmp}) do
     :ets.foldl(fn {_url, file}, _ -> File.rm(file.path) end, :ok, @table)
     File.rmdir(tmp)
     :ok
