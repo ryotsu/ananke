@@ -46,7 +46,7 @@ let fetch_url = (name, size, set_location) => {
   let headers = Fetch.HeadersInit.make({"content-type": "application/json"});
   Js.Promise.(
     Fetch.fetchWithInit(
-      "/upload",
+      "/share",
       Fetch.RequestInit.make(~method_=Post, ~body, ~headers, ())
     )
     |> then_(get_header_value("location"))

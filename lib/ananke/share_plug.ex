@@ -6,17 +6,16 @@ defmodule Ananke.SharePlug do
 
   def init(opts) do
     opts
-    |> Keyword.put_new(:upload, "/upload")
-    |> Keyword.put_new(:download, "/download")
+    |> Keyword.put_new(:share, "/share")
   end
 
   def call(%Plug.Conn{method: method} = conn, opts) when method == "POST" do
-    upload_url = Keyword.fetch!(opts, :upload)
+    share_url = Keyword.fetch!(opts, :share)
 
     case initiate_upload(conn) do
       {:ok, url} ->
         conn
-        |> put_resp_header("location", upload_url <> "/" <> url)
+        |> put_resp_header("location", share_url <> "/" <> url)
         |> send_resp(:ok, "")
 
       :error ->
@@ -50,6 +49,7 @@ defmodule Ananke.SharePlug do
     send_resp(conn, :not_found, "")
   end
 
+  @spec initiate_upload(Plug.Conn.t()) :: {:ok, String.t()} | :error
   defp initiate_upload(%Plug.Conn{body_params: params}) do
     with {:ok, name} <- Map.fetch(params, "name"),
          {:ok, size} <- Map.fetch(params, "size") do
@@ -60,6 +60,8 @@ defmodule Ananke.SharePlug do
     end
   end
 
+  @spec handle_upload(String.t(), Plug.Conn.t(), list) ::
+          {:ok, Plug.Conn.t(), Plug.Conn.status(), integer} | :error
   defp handle_upload(path, conn, opts) do
     with {:ok, file} <- Manager.get_file(path),
          {conn, status, file} <- Upload.write(file, conn, opts),
@@ -68,12 +70,14 @@ defmodule Ananke.SharePlug do
     end
   end
 
+  @spec handle_download(String.t(), Plug.Conn.t(), list) :: Plug.Conn.t() | :error
   defp handle_download(path, conn, _opts) do
     with {:ok, file} <- Manager.download_file(path) do
       download(conn, file)
     end
   end
 
+  @spec download(Plug.Conn.t(), Upload.t()) :: Plug.Conn.t()
   defp download(conn, %Upload{size: size, uploaded: uploaded} = upload) when size == uploaded do
     conn
     |> set_headers(upload.name)
@@ -88,6 +92,7 @@ defmodule Ananke.SharePlug do
     |> start_chunk_download(upload.path, size, uploaded)
   end
 
+  @spec set_headers(Plug.Conn.t(), String.t()) :: Plug.Conn.t()
   defp set_headers(conn, name) do
     conn
     |> put_resp_content_type("application/octet-stream")
@@ -95,6 +100,7 @@ defmodule Ananke.SharePlug do
     |> put_resp_header("content-disposition", ~s[attachment; filename="#{name}"])
   end
 
+  @spec start_chunk_download(Plug.Conn.t(), String.t(), integer, integer) :: Plug.Conn.t()
   defp start_chunk_download(conn, path, size, uploaded) do
     {:ok, file} = File.open(path, [:read, :binary, :raw])
     data = IO.binread(file, uploaded)
@@ -102,6 +108,7 @@ defmodule Ananke.SharePlug do
     chunk_download(conn, file, size, uploaded)
   end
 
+  @spec chunk_download(Plug.Conn.t(), :file.io_device(), integer, integer) :: Plug.Conn.t()
   defp chunk_download(conn, file, size, uploaded) when size != uploaded do
     receive do
       {:next, up} ->

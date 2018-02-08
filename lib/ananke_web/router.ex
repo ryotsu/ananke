@@ -20,7 +20,7 @@ defmodule AnankeWeb.Router do
     get("/", PageController, :index)
   end
 
-  forward("/upload", Ananke.SharePlug)
+  forward("/share", Ananke.SharePlug)
   # Other scopes may use custom stacks.
   # scope "/api", AnankeWeb do
   #   pipe_through :api
