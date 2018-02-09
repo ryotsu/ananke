@@ -13,9 +13,10 @@ defmodule Ananke.SharePlug do
     share_url = Keyword.fetch!(opts, :share)
 
     case initiate_upload(conn) do
-      {:ok, url} ->
+      {:ok, url, key} ->
         conn
         |> put_resp_header("location", share_url <> "/" <> url)
+        |> put_resp_header("x-key", key)
         |> send_resp(:ok, "")
 
       :error ->
@@ -55,15 +56,16 @@ defmodule Ananke.SharePlug do
          {:ok, size} <- Map.fetch(params, "size") do
       size = if is_integer(size), do: size, else: String.to_integer(size)
 
-      url = Manager.new(name, size)
-      {:ok, url}
+      {url, key} = Manager.new(name, size)
+      {:ok, url, key}
     end
   end
 
   @spec handle_upload(String.t(), Plug.Conn.t(), list) ::
           {:ok, Plug.Conn.t(), Plug.Conn.status(), integer} | :error
   defp handle_upload(path, conn, opts) do
-    with {:ok, file} <- Manager.get_file(path),
+    with [key] <- get_header_value(conn, "x-key"),
+         {:ok, file} <- Manager.get_file(path, key),
          {conn, status, file} <- Upload.write(file, conn, opts),
          :ok <- Manager.save_file(path, file) do
       {:ok, conn, status, file.uploaded}
@@ -128,5 +130,13 @@ defmodule Ananke.SharePlug do
   defp chunk_download(conn, file, _, _) do
     File.close(file)
     conn
+  end
+
+  @spec get_header_value(Plug.Conn.t(), String.t()) :: String.t() | :error
+  defp get_header_value(conn, key) do
+    case get_req_header(conn, key) do
+      [] -> :error
+      [value] -> [value]
+    end
   end
 end

@@ -2,12 +2,13 @@ defmodule Ananke.Upload do
   @type t :: %__MODULE__{
           name: String.t(),
           url: String.t(),
+          key: String.t(),
           path: Path.t(),
           size: integer,
           uploaded: integer
         }
 
-  defstruct [:name, :url, :path, :size, uploaded: 0]
+  defstruct [:name, :url, :key, :path, :size, uploaded: 0]
 
   @spec write(t, Plug.Conn.t(), list) :: {Plug.Conn.t(), :accepted | :created, t}
   def write(%__MODULE__{path: path, uploaded: uploaded, size: size} = upload, conn, opts) do

@@ -14,9 +14,9 @@ defmodule Ananke.Manager do
     GenServer.call(__MODULE__, {:new, name, size})
   end
 
-  @spec get_file(String.t()) :: {:ok, Upload.t()} | :error
-  def get_file(url) do
-    GenServer.call(__MODULE__, {:get, url})
+  @spec get_file(String.t(), String.t()) :: {:ok, Upload.t()} | :error
+  def get_file(url, key) do
+    GenServer.call(__MODULE__, {:get, url, key})
   end
 
   @spec save_file(String.t(), Upload.t()) :: :ok
@@ -40,12 +40,12 @@ defmodule Ananke.Manager do
   def handle_call({:new, name, size}, _from, %{tmp: tmp} = state) do
     file = create(name, size, tmp)
     true = :ets.insert_new(@table, {file.url, file})
-    {:reply, file.url, state}
+    {:reply, {file.url, file.key}, state}
   end
 
-  def handle_call({:get, url}, _from, %{opened: opened} = state) do
+  def handle_call({:get, url, key}, _from, %{opened: opened} = state) do
     case {:ets.lookup(@table, url), url in opened} do
-      {[{^url, file}], false} ->
+      {[{^url, %Upload{key: ^key} = file}], false} ->
         {:reply, {:ok, file}, %{state | opened: [url | opened]}}
 
       _ ->
@@ -62,9 +62,9 @@ defmodule Ananke.Manager do
   def handle_call({:download, url}, {pid, _tag}, %{downloaders: dlrs, pids: pids} = state) do
     case :ets.lookup(@table, url) do
       [{^url, file}] ->
-        Process.monitor(pid)
+        ref = Process.monitor(pid)
         dlrs = Map.update(dlrs, url, [pid], fn pids -> [pid | pids] end)
-        pids = Map.put(pids, pid, url)
+        pids = Map.put(pids, pid, {url, ref})
         {:reply, {:ok, file}, %{state | downloaders: dlrs, pids: pids}}
 
       _ ->
@@ -73,7 +73,8 @@ defmodule Ananke.Manager do
   end
 
   def handle_info({:DOWN, _ref, :process, pid, _rsn}, %{downloaders: dlrs, pids: pids} = state) do
-    {url, pids} = Map.pop(pids, pid)
+    {{url, ref}, pids} = Map.pop(pids, pid)
+    Process.demonitor(ref)
     dlrs = Map.update(dlrs, url, [], &List.delete(&1, pid))
     {:noreply, %{state | downloaders: dlrs, pids: pids}}
   end
@@ -87,6 +88,7 @@ defmodule Ananke.Manager do
   @spec create(String.t(), integer, Path.t()) :: Upload.t()
   defp create(name, size, tmp) do
     url = :crypto.strong_rand_bytes(12) |> Base.url_encode64()
+    key = :crypto.strong_rand_bytes(12) |> Base.url_encode64()
     filename = :crypto.strong_rand_bytes(12) |> Base.url_encode64()
     path = Path.join(tmp, filename)
     :ok = File.touch(path)
@@ -94,6 +96,7 @@ defmodule Ananke.Manager do
     %Upload{
       name: name,
       url: url,
+      key: key,
       path: path,
       size: size
     }

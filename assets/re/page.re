@@ -3,12 +3,13 @@ open Utils;
 type action =
   | Select(file)
   | FetchUrl
-  | Upload(string)
+  | Upload(string, string)
   | ContinueUpload(string, int);
 
 type upload = {
   file,
   url: string,
+  key: string,
   uploaded: int
 };
 
@@ -31,38 +32,42 @@ let get_file = event : file => {
 };
 
 let get_header_value = (header, resp) =>
-  Fetch.Response.headers(resp)
-  |> Fetch.Headers.get(header)
-  |> map(Js.Promise.resolve)
-  |> unwrap;
+  Fetch.Response.headers(resp) |> Fetch.Headers.get(header) |> unwrap;
 
 let make_init_req_body = (name, size) =>
   Json.Encode.(object_([("name", string(name)), ("size", int(size))]))
   |> Json.stringify
   |> Fetch.BodyInit.make;
 
-let fetch_url = (name, size, set_location) => {
+let fetch_url = (name, size, set_upload) => {
   let body = make_init_req_body(name, size);
   let headers = Fetch.HeadersInit.make({"content-type": "application/json"});
   Js.Promise.(
     Fetch.fetchWithInit(
       "/share",
-      Fetch.RequestInit.make(~method_=Post, ~body, ~headers, ())
+      Fetch.RequestInit.make(~method_=Post, ~headers, ~body, ())
     )
-    |> then_(get_header_value("location"))
-    |> then_(location => {
-         set_location(location);
+    |> then_(resp =>
+         (get_header_value("location", resp), get_header_value("x-key", resp))
+         |> resolve
+       )
+    |> then_(((url, key)) => {
+         set_upload(url, key);
          resolve();
        })
     |> ignore
   );
 };
 
-let upload_blob = (file, size, start, end', url, continue) => {
+let upload_blob = (file, size, start, end', url, key, continue) => {
   let end' = size > end' ? end' : size;
   let body = file |> slice(start, end') |> Fetch.BodyInit.makeWithBlob;
+  let headers = Fetch.HeadersInit.make({"x-key": key});
   Js.Promise.(
-    Fetch.fetchWithInit(url, Fetch.RequestInit.make(~method_=Put, ~body, ()))
+    Fetch.fetchWithInit(
+      url,
+      Fetch.RequestInit.make(~method_=Put, ~headers, ~body, ())
+    )
     |> then_(_resp => {
          continue(url, end');
          resolve();
@@ -82,26 +87,29 @@ let make = _children => {
     | (FetchUrl, Selected({name, size} as file)) =>
       ReasonReact.UpdateWithSideEffects(
         InitiatedUpload(file),
-        (self => fetch_url(name, size, url => self.send(Upload(url))))
-      )
-    | (Upload(url), InitiatedUpload(file)) =>
-      ReasonReact.UpdateWithSideEffects(
-        Uploading({file, url, uploaded: 0}),
         (
           self =>
-            upload_blob(file.file, file.size, 0, offset, url, (url, end') =>
+            fetch_url(name, size, (url, key) => self.send(Upload(url, key)))
+        )
+      )
+    | (Upload(url, key), InitiatedUpload(file)) =>
+      ReasonReact.UpdateWithSideEffects(
+        Uploading({file, url, key, uploaded: 0}),
+        (
+          self =>
+            upload_blob(file.file, file.size, 0, offset, url, key, (url, end') =>
               self.send(ContinueUpload(url, end'))
             )
         )
       )
-    | (ContinueUpload(url, up), Uploading({file: {file, size}} as upload)) =>
+    | (ContinueUpload(url, up), Uploading({file: {file, size}, key} as upload)) =>
       up == size ?
         ReasonReact.Update(Uploaded({...upload, uploaded: up})) :
         ReasonReact.UpdateWithSideEffects(
           Uploading({...upload, uploaded: up}),
           (
             self =>
-              upload_blob(file, size, up, up + offset, url, (url, end') =>
+              upload_blob(file, size, up, up + offset, url, key, (url, end') =>
                 self.send(ContinueUpload(url, end'))
               )
           )
@@ -112,8 +120,10 @@ let make = _children => {
     <div className="centered">
       (
         switch state {
-        | Uploading({url}) => <span> (str(url)) </span>
-        | Uploaded({url}) => <span> (str(url)) </span>
+        | Uploading({url}) =>
+          <a href=url target="_blank"> (str("Download File")) </a>
+        | Uploaded({url}) =>
+          <a href=url target="_blank"> (str("Download File")) </a>
         | _ => ReasonReact.nullElement
         }
       )
