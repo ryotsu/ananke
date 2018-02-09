@@ -120,8 +120,7 @@ let make = _children => {
     <div className="centered">
       (
         switch state {
-        | Uploading({url}) =>
-          <a href=url target="_blank"> (str("Download File")) </a>
+        | Uploading({url})
         | Uploaded({url}) =>
           <a href=url target="_blank"> (str("Download File")) </a>
         | _ => ReasonReact.nullElement
@@ -133,8 +132,8 @@ let make = _children => {
             "file-upload pure-button pure-button-primary"
             ++ (
               switch state {
-              | InitiatedUpload(_file) => " pure-button-disabled"
-              | Uploading(_upload) => " pure-button-disabled"
+              | InitiatedUpload(_)
+              | Uploading(_) => " pure-button-disabled"
               | _ => ""
               }
             )
