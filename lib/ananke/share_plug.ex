@@ -7,12 +7,14 @@ defmodule Ananke.SharePlug do
   def init(opts) do
     opts
     |> Keyword.put_new(:share, "/share")
+    |> Keyword.put_new(:max_size, 100_000_000)
   end
 
   def call(%Plug.Conn{method: method} = conn, opts) when method == "POST" do
     share_url = Keyword.fetch!(opts, :share)
+    max_size = Keyword.fetch!(opts, :max_size)
 
-    case initiate_upload(conn) do
+    case initiate_upload(conn, max_size) do
       {:ok, url, key} ->
         conn
         |> put_resp_header("location", share_url <> "/" <> url)
@@ -20,7 +22,10 @@ defmodule Ananke.SharePlug do
         |> send_resp(:ok, "")
 
       :error ->
-        send_resp(conn, :bad_request, "")
+        send_resp(conn, :bad_request, "Bad Request: File name or size not provided")
+
+      {:error, error} ->
+        send_resp(conn, :bad_request, error)
     end
   end
 
@@ -50,14 +55,19 @@ defmodule Ananke.SharePlug do
     send_resp(conn, :not_found, "")
   end
 
-  @spec initiate_upload(Plug.Conn.t()) :: {:ok, String.t()} | :error
-  defp initiate_upload(%Plug.Conn{body_params: params}) do
+  @spec initiate_upload(Plug.Conn.t(), integer) ::
+          {:ok, String.t()} | :error | {:error, String.t()}
+  defp initiate_upload(%Plug.Conn{body_params: params}, max_size) do
     with {:ok, name} <- Map.fetch(params, "name"),
          {:ok, size} <- Map.fetch(params, "size") do
       size = if is_integer(size), do: size, else: String.to_integer(size)
 
-      {url, key} = Manager.new(name, size)
-      {:ok, url, key}
+      if size < max_size do
+        {url, key} = Manager.new(name, size)
+        {:ok, url, key}
+      else
+        {:error, "Bad Request: File is bigger than #{max_size} bytes"}
+      end
     end
   end
 

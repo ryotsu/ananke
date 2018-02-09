@@ -4,7 +4,8 @@ type action =
   | Select(file)
   | FetchUrl
   | Upload(string, string)
-  | ContinueUpload(string, int);
+  | ContinueUpload(string, int)
+  | ShowError(string);
 
 type upload = {
   file,
@@ -16,6 +17,7 @@ type upload = {
 type state =
   | NotSelected
   | Selected(file)
+  | Error(string, file)
   | InitiatedUpload(file)
   | Uploading(upload)
   | Uploaded(upload);
@@ -39,7 +41,26 @@ let make_init_req_body = (name, size) =>
   |> Json.stringify
   |> Fetch.BodyInit.make;
 
-let fetch_url = (name, size, set_upload) => {
+let check_resp = (start_upload, send_error, resp) =>
+  (
+    switch (Fetch.Response.status(resp)) {
+    | 200 =>
+      let url = get_header_value("location", resp);
+      let key = get_header_value("x-key", resp);
+      start_upload(url, key);
+    | 400 =>
+      Fetch.Response.text(resp)
+      |> Js.Promise.then_(error => {
+           send_error(error);
+           Js.Promise.resolve();
+         })
+      |> ignore
+    | _ => send_error("Some error occurred")
+    }
+  )
+  |> Js.Promise.resolve;
+
+let fetch_url = (name, size, start_upload, send_error) => {
   let body = make_init_req_body(name, size);
   let headers = Fetch.HeadersInit.make({"content-type": "application/json"});
   Js.Promise.(
@@ -47,14 +68,7 @@ let fetch_url = (name, size, set_upload) => {
       "/share",
       Fetch.RequestInit.make(~method_=Post, ~headers, ~body, ())
     )
-    |> then_(resp =>
-         (get_header_value("location", resp), get_header_value("x-key", resp))
-         |> resolve
-       )
-    |> then_(((url, key)) => {
-         set_upload(url, key);
-         resolve();
-       })
+    |> then_(check_resp(start_upload, send_error))
     |> ignore
   );
 };
@@ -84,12 +98,18 @@ let make = _children => {
   reducer: (action, state) =>
     switch (action, state) {
     | (Select(file), _) => ReasonReact.Update(Selected(file))
+    | (FetchUrl, Error(_, {name, size} as file))
     | (FetchUrl, Selected({name, size} as file)) =>
       ReasonReact.UpdateWithSideEffects(
         InitiatedUpload(file),
         (
           self =>
-            fetch_url(name, size, (url, key) => self.send(Upload(url, key)))
+            fetch_url(
+              name,
+              size,
+              (url, key) => self.send(Upload(url, key)),
+              error => self.send(ShowError(error))
+            )
         )
       )
     | (Upload(url, key), InitiatedUpload(file)) =>
@@ -114,6 +134,8 @@ let make = _children => {
               )
           )
         )
+    | (ShowError(error), InitiatedUpload(file)) =>
+      ReasonReact.Update(Error(error, file))
     | (_, _) => ReasonReact.NoUpdate
     },
   render: ({state, send}) =>
@@ -123,6 +145,7 @@ let make = _children => {
         | Uploading({url})
         | Uploaded({url}) =>
           <a href=url target="_blank"> (str("Download File")) </a>
+        | Error(error, _) => <span> (str(error)) </span>
         | _ => ReasonReact.nullElement
         }
       )
