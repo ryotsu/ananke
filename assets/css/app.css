@@ -49,3 +49,10 @@ i {
 .button-secondary {
   background: rgb(202, 60, 60);
 }
+
+.error {
+  padding: 10px;
+  background-color: #f44336;
+  color: white;
+  border-radius: 5px;
+}

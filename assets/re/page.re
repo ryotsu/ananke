@@ -145,7 +145,11 @@ let make = _children => {
         | Uploading({url})
         | Uploaded({url}) =>
           <a href=url target="_blank"> (str("Download File")) </a>
-        | Error(error, _) => <span> (str(error)) </span>
+        | Error(error, _) =>
+          <div className="error">
+            <i className="fa fa-exclamation-triangle" />
+            <span> (str(error)) </span>
+          </div>
         | _ => ReasonReact.nullElement
         }
       )
