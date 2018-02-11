@@ -56,7 +56,7 @@ defmodule Ananke.SharePlug do
   end
 
   @spec initiate_upload(Plug.Conn.t(), integer) ::
-          {:ok, String.t()} | :error | {:error, String.t()}
+          {:ok, String.t(), String.t()} | :error | {:error, String.t()}
   defp initiate_upload(%Plug.Conn{body_params: params}, max_size) do
     with {:ok, name} <- Map.fetch(params, "name"),
          {:ok, size} <- Map.fetch(params, "size") do

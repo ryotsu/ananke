@@ -11,7 +11,7 @@ defmodule Ananke.Manager do
     GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
   end
 
-  @spec new(String.t(), integer) :: String.t()
+  @spec new(String.t(), integer) :: {String.t(), String.t()}
   def new(name, size) do
     GenServer.call(__MODULE__, {:new, name, size})
   end
