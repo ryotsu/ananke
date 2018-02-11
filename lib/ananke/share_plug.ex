@@ -44,7 +44,7 @@ defmodule Ananke.SharePlug do
   def call(%Plug.Conn{method: method, path_info: [path]} = conn, opts) when method == "GET" do
     case handle_download(path, conn, opts) do
       :error ->
-        send_resp(conn, :not_found, "")
+        send_resp(conn, :not_found, "Not Found")
 
       conn ->
         conn

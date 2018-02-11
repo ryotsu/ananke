@@ -5,6 +5,8 @@ defmodule Ananke.Manager do
 
   @table __MODULE__
 
+  @delay 30 * 60 * 1000
+
   def start_link do
     GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
   end
@@ -34,7 +36,8 @@ defmodule Ananke.Manager do
     :ets.new(@table, [:named_table, :public, :set])
     tmp = Path.join(File.cwd!(), "tmp")
     :ok = File.mkdir_p(tmp)
-    {:ok, %{tmp: tmp, opened: [], downloaders: %{}, pids: %{}}}
+    Process.send_after(self(), :clear_files, @delay)
+    {:ok, %{tmp: tmp, opened: [], downloaders: %{}}}
   end
 
   def handle_call({:new, name, size}, _from, %{tmp: tmp} = state) do
@@ -59,24 +62,42 @@ defmodule Ananke.Manager do
     {:reply, :ok, %{state | opened: List.delete(opened, url)}}
   end
 
-  def handle_call({:download, url}, {pid, _tag}, %{downloaders: dlrs, pids: pids} = state) do
+  def handle_call({:download, url}, {pid, _tag}, %{downloaders: downloaders} = state) do
     case :ets.lookup(@table, url) do
       [{^url, file}] ->
         ref = Process.monitor(pid)
-        dlrs = Map.update(dlrs, url, [pid], fn pids -> [pid | pids] end)
-        pids = Map.put(pids, pid, {url, ref})
-        {:reply, {:ok, file}, %{state | downloaders: dlrs, pids: pids}}
+
+        downloaders =
+          downloaders
+          |> Map.update(url, [pid], fn pids -> [pid | pids] end)
+          |> Map.put(pid, {url, ref})
+
+        {:reply, {:ok, file}, %{state | downloaders: downloaders}}
 
       _ ->
         {:reply, :error, state}
     end
   end
 
-  def handle_info({:DOWN, _ref, :process, pid, _rsn}, %{downloaders: dlrs, pids: pids} = state) do
-    {{url, ref}, pids} = Map.pop(pids, pid)
+  def handle_info(:clear_files, %{opened: opened, downloaders: downloaders} = state) do
+    downloaders =
+      :ets.foldl(
+        fn {url, file}, downloaders ->
+          remove_files(url, file, opened, downloaders)
+        end,
+        downloaders,
+        @table
+      )
+
+    Process.send_after(self(), :clear_files, @delay)
+    {:noreply, %{state | downloaders: downloaders}}
+  end
+
+  def handle_info({:DOWN, _ref, :process, pid, _rsn}, %{downloaders: downloaders} = state) do
+    {{url, ref}, downloaders} = Map.pop(downloaders, pid)
     Process.demonitor(ref)
-    dlrs = Map.update(dlrs, url, [], &List.delete(&1, pid))
-    {:noreply, %{state | downloaders: dlrs, pids: pids}}
+    downloaders = Map.update(downloaders, url, [], &List.delete(&1, pid))
+    {:noreply, %{state | downloaders: downloaders}}
   end
 
   def terminate(_reason, %{tmp: tmp}) do
@@ -98,7 +119,27 @@ defmodule Ananke.Manager do
       url: url,
       key: key,
       path: path,
+      created: Time.utc_now(),
       size: size
     }
+  end
+
+  @spec remove_files(String.t(), Upload.t(), [String.t()], map) :: map
+  defp remove_files(url, file, opened, downloaders) do
+    case {Time.diff(Time.utc_now(), file.created, :millisecond) > @delay, url in opened} do
+      {true, false} ->
+        {pids, downloaders} = Map.pop(downloaders, url, [])
+        File.rm(file.path)
+        :ets.delete(@table, url)
+
+        Enum.reduce(pids, downloaders, fn pid, dl ->
+          {{^url, ref}, dl} = Map.pop(dl, pid)
+          Process.demonitor(ref)
+          dl
+        end)
+
+      _ ->
+        downloaders
+    end
   end
 end
