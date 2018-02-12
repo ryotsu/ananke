@@ -28,7 +28,8 @@ const config = {
           test: /\.(ttf|eot|woff|woff2)$/,
           loader: "file-loader",
           options: {
-            name: "[name].[ext]",
+            publicPath: "../",
+            name: "css/[name].[ext]",
           },
         },
         {
