@@ -1,37 +1,30 @@
 open Utils;
 
+open Antd;
+
 type action =
   | Select(file)
   | FetchUrl
-  | Upload(string, string)
-  | ContinueUpload(string, int)
-  | ShowError(string);
+  | Start(string, string)
+  | Continue(int)
+  | Error(string);
 
-type upload = {
-  file,
-  url: string,
-  key: string,
+type status =
+  | NotSelected
+  | Selected
+  | Uploading
+  | Finished
+  | Failed;
+
+type state = {
+  status,
+  file: option(file),
+  url: option(string),
+  key: option(string),
   uploaded: int
 };
 
-type state =
-  | NotSelected
-  | Selected(file)
-  | Error(string, file)
-  | InitiatedUpload(file)
-  | Uploading(upload)
-  | Uploaded(upload);
-
-let offset = 8_000_000;
-
-let get_file = event : file => {
-  let files = (event |> ReactEventRe.Form.target |> ReactDOMRe.domElementToObj)##files;
-  {
-    file: files[0],
-    name: files[0] |> get_file_name,
-    size: files[0] |> get_file_size
-  };
-};
+let offset = 500_000;
 
 let get_header_value = (header, resp) =>
   Fetch.Response.headers(resp) |> Fetch.Headers.get(header) |> unwrap;
@@ -60,7 +53,7 @@ let check_resp = (start_upload, send_error, resp) =>
   )
   |> Js.Promise.resolve;
 
-let fetch_url = (name, size, start_upload, send_error) => {
+let fetch_url = ({name, size}, start_upload, send_error) => {
   let body = make_init_req_body(name, size);
   let headers = Fetch.HeadersInit.make({"content-type": "application/json"});
   Js.Promise.(
@@ -73,7 +66,7 @@ let fetch_url = (name, size, start_upload, send_error) => {
   );
 };
 
-let upload_blob = (file, size, start, end', url, key, continue) => {
+let upload_blob = ({file, size}, start, end', url, key, continue) => {
   let end' = size > end' ? end' : size;
   let body = file |> slice(start, end') |> Fetch.BodyInit.makeWithBlob;
   let headers = Fetch.HeadersInit.make({"x-key": key});
@@ -83,116 +76,135 @@ let upload_blob = (file, size, start, end', url, key, continue) => {
       Fetch.RequestInit.make(~method_=Put, ~headers, ~body, ())
     )
     |> then_(_resp => {
-         continue(url, end');
+         continue(end');
          resolve();
        })
     |> ignore
   );
 };
 
+let beforeUpload = (send, file) => {
+  let file = {file, name: file |> get_file_name, size: file |> get_file_size};
+  send(Select(file));
+  Js.false_;
+};
+
 let component = ReasonReact.reducerComponent("Page");
 
 let make = _children => {
   ...component,
-  initialState: () => NotSelected,
-  reducer: (action, state) =>
-    switch (action, state) {
-    | (Select(file), _) => ReasonReact.Update(Selected(file))
-    | (FetchUrl, Error(_, {name, size} as file))
-    | (FetchUrl, Selected({name, size} as file)) =>
+  initialState: () => {
+    status: NotSelected,
+    file: None,
+    url: None,
+    key: None,
+    uploaded: 0
+  },
+  reducer: (action, {file, url, key} as state) =>
+    switch action {
+    | Select(file) =>
+      ReasonReact.Update({...state, status: Selected, file: Some(file)})
+    | FetchUrl =>
       ReasonReact.UpdateWithSideEffects(
-        InitiatedUpload(file),
+        {...state, status: Uploading, url: None, key: None, uploaded: 0},
         (
           self =>
             fetch_url(
-              name,
-              size,
-              (url, key) => self.send(Upload(url, key)),
-              error => self.send(ShowError(error))
+              unwrap(file),
+              (url, key) => self.send(Start(url, key)),
+              error => self.send(Error(error))
             )
         )
       )
-    | (Upload(url, key), InitiatedUpload(file)) =>
+    | Start(url, key) =>
       ReasonReact.UpdateWithSideEffects(
-        Uploading({file, url, key, uploaded: 0}),
+        {...state, url: Some(url), key: Some(key)},
         (
           self =>
-            upload_blob(file.file, file.size, 0, offset, url, key, (url, end') =>
-              self.send(ContinueUpload(url, end'))
+            upload_blob(unwrap(file), 0, offset, url, key, end' =>
+              self.send(Continue(end'))
             )
         )
       )
-    | (ContinueUpload(url, up), Uploading({file: {file, size}, key} as upload)) =>
-      up == size ?
-        ReasonReact.Update(Uploaded({...upload, uploaded: up})) :
+    | Continue(start) =>
+      start == unwrap(file).size ?
         ReasonReact.UpdateWithSideEffects(
-          Uploading({...upload, uploaded: up}),
+          {...state, status: Finished, uploaded: start},
+          (_self => Message.success("Uploaded successfully", 3))
+        ) :
+        ReasonReact.UpdateWithSideEffects(
+          {...state, uploaded: start},
           (
             self =>
-              upload_blob(file, size, up, up + offset, url, key, (url, end') =>
-                self.send(ContinueUpload(url, end'))
+              upload_blob(
+                unwrap(file),
+                start,
+                start + offset,
+                unwrap(url),
+                unwrap(key),
+                end' =>
+                self.send(Continue(end'))
               )
           )
         )
-    | (ShowError(error), InitiatedUpload(file)) =>
-      ReasonReact.Update(Error(error, file))
-    | (_, _) => ReasonReact.NoUpdate
-    },
-  render: ({state, send}) =>
-    <div className="centered">
-      (
-        switch state {
-        | Uploading({url})
-        | Uploaded({url}) =>
-          <a href=url target="_blank"> (str("Download File")) </a>
-        | Error(error, _) =>
-          <div className="error">
-            <i className="fa fa-exclamation-triangle" />
-            <span> (str(error)) </span>
-          </div>
-        | _ => ReasonReact.nullElement
-        }
+    | Error(error) =>
+      ReasonReact.UpdateWithSideEffects(
+        {...state, status: Failed},
+        (_self => Message.error(error, 3))
       )
+    },
+  render: ({state: {file, status, uploaded, url}, send}) =>
+    <div className="centered">
       <div className="box">
-        <div
-          className=(
-            "file-upload pure-button pure-button-primary"
-            ++ (
-              switch state {
-              | InitiatedUpload(_)
-              | Uploading(_) => " pure-button-disabled"
-              | _ => ""
-              }
-            )
-          )>
-          <i className="fa fa-file" />
-          <span> (str("Select File")) </span>
-          <input _type="file" onChange=(evt => send(Select(get_file(evt)))) />
-        </div>
-        <div
-          className=(
-            "pure-button button-secondary"
-            ++ (
-              switch state {
-              | Selected(_file) => ""
-              | _ => " pure-button-disabled"
-              }
-            )
-          )
+        (
+          (status == Uploading || status == Finished) && url != None ?
+            <Button href=(unwrap(url)) icon="download">
+              (str("Download"))
+            </Button> :
+            ReasonReact.nullElement
+        )
+      </div>
+      <div className="box">
+        <Upload beforeUpload=(beforeUpload(send))>
+          <Button
+            type_="primary"
+            size="large"
+            icon="file"
+            disabled=(status == Uploading)>
+            (str("Select File"))
+          </Button>
+        </Upload>
+        <Button
+          type_="primary"
+          size="large"
+          icon="upload"
+          disabled=(status != Selected && status != Failed)
+          loading=(status == Uploading |> Js.Boolean.to_js_boolean)
           onClick=(_evt => send(FetchUrl))>
-          <i className="fa fa-upload" />
-          <span> (str("Upload File")) </span>
-        </div>
+          (str("Upload File"))
+        </Button>
       </div>
       (
-        switch state {
-        | Uploading({file: {size}, uploaded}) =>
-          <progress
-            value=(uploaded |> string_of_int)
-            max=(size |> string_of_int)
-          />
-        | _ => ReasonReact.nullElement
-        }
+        status != NotSelected && status != Selected ?
+          ReasonReact.cloneElement(
+            <Progress
+              percent=(
+                (uploaded |> float_of_int)
+                /. (unwrap(file).size |> float_of_int)
+                *. 100.0
+                |> int_of_float
+              )
+              type_="line"
+            />,
+            ~props=
+              switch status {
+              | Uploading => {"status": "active"}
+              | Failed => {"status": "exception"}
+              | _ => {"status": "success"}
+              },
+            [||]
+          ) :
+          ReasonReact.nullElement
       )
     </div>
 };

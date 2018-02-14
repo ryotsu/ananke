@@ -1,8 +1,5 @@
 /* This file is for your main application css. */
 
-@import "~purecss/build/pure.css";
-@import "~font-awesome/css/font-awesome.css";
-
 html, body {
   height: 100%;
 }
@@ -22,8 +19,14 @@ html, body {
 }
 
 .box {
+  margin: 5px;
   text-align: center;
-  margin: 10px;
+  display: flex;
+  flex-direction: row;
+}
+
+.box > * {
+  margin: 5px;
 }
 
 .file-upload {
